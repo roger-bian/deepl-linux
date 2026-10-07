@@ -31,7 +31,7 @@ cd deepl-linux
 ```
 
 `install.sh` will:
-1. Install apt dependencies: `python3-gi`, `gir1.2-gtk-3.0`, `python3-requests`, `wl-clipboard`.
+1. Install apt dependencies: `python3-gi`, `gir1.2-gtk-3.0`, `python3-requests`, `python3-langdetect`, `wl-clipboard`.
 2. Write an autostart entry to `~/.config/autostart/deepl-popup.desktop` so the daemon starts every login.
 3. Start the daemon immediately.
 
@@ -47,14 +47,36 @@ Shortcuts → Add**, and set:
 ## First run / API key
 
 Get a free API key at <https://www.deepl.com/pro-api>. The first time you
-open the popup without a configured key, it shows a one-field setup screen
-to paste it in. You can also set it from the terminal:
+open the popup without a configured key, it shows a setup screen to paste it
+in and to pick your two most-used output languages (see below). You can also
+set both from the terminal (either flag works on its own too):
 
 ```bash
-python3 -m deepl_popup.daemon --set-key "YOUR_API_KEY"
+python3 -m deepl_popup.daemon --set-key "YOUR_API_KEY" --languages EN-US,JA
 ```
 
 The key is stored in `~/.config/deepl-popup/config.ini` (mode 600).
+
+## Automatic output language
+
+When the popup opens with clipboard text, it detects the text's language
+locally (no API call) and sets the output to your most-used language that
+*isn't* the text's language. With English and Japanese as your top two,
+Japanese text goes to English, English text goes to Japanese, and anything
+else goes to whichever of the two you use most.
+
+- The ranking starts from the two languages picked at setup (the
+  `preferred_targets` line in `config.ini`) and then follows how often you
+  actually translate into each language, counted in
+  `~/.config/deepl-popup/usage.json`.
+- If the source language box is set to a specific language rather than
+  "Detect language", that language is used instead of detection.
+- Very short or ambiguous text (e.g. "OK", or kanji with no kana) can't be
+  detected reliably, so it goes to your most-used language. There are no
+  automatic retries: if the text was already in that language, pick another
+  output language and press Translate.
+- This only happens when the popup opens. Clicking **Translate** or pressing
+  Ctrl+Enter always uses whatever output language is selected.
 
 ## Using it
 

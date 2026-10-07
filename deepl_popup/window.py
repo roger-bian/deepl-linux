@@ -7,7 +7,7 @@ gi.require_version("Gtk", "3.0")
 gi.require_version("Gdk", "3.0")
 from gi.repository import Gdk, GLib, Gtk  # noqa: E402
 
-from deepl_popup import api, config, languages
+from deepl_popup import api, config, detect, languages
 
 
 def _error_message(error) -> str:
@@ -29,6 +29,7 @@ class PopupWindow(Gtk.Window):
         self.set_position(Gtk.WindowPosition.CENTER)
 
         self.config = config.load()
+        self.usage = config.load_usage()
         self.last_detected_source = None
         self.request_generation = 0
 
@@ -68,6 +69,26 @@ class PopupWindow(Gtk.Window):
         self.setup_entry.connect("activate", lambda *_: self._on_setup_save_clicked())
         box.pack_start(self.setup_entry, False, False, 0)
 
+        langs_label = Gtk.Label(
+            label="Your two most-used output languages (a starting point; usage is tracked from here):"
+        )
+        langs_label.set_halign(Gtk.Align.START)
+        langs_label.set_line_wrap(True)
+        box.pack_start(langs_label, False, False, 0)
+
+        _, cached_target = config.load_language_cache()
+        target_list = cached_target or languages.FALLBACK_TARGET_LANGUAGES
+        langs_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=6)
+        self.setup_lang_combos = []
+        for i in range(2):
+            combo = Gtk.ComboBoxText()
+            fallback = ["EN-US", "JA"][i]
+            preferred = self.config.preferred_targets
+            self._fill_combo(combo, target_list, preferred[i] if i < len(preferred) else fallback)
+            langs_row.pack_start(combo, True, True, 0)
+            self.setup_lang_combos.append(combo)
+        box.pack_start(langs_row, False, False, 0)
+
         self.setup_error_label = Gtk.Label(label="")
         self.setup_error_label.set_halign(Gtk.Align.START)
         self.setup_error_label.get_style_context().add_class("error")
@@ -85,7 +106,12 @@ class PopupWindow(Gtk.Window):
         if not key:
             self.setup_error_label.set_text("API key cannot be empty")
             return
+        targets = [combo.get_active_id() for combo in self.setup_lang_combos]
+        if languages.to_source_code(targets[0]) == languages.to_source_code(targets[1]):
+            self.setup_error_label.set_text("Pick two different languages")
+            return
         config.set_api_key(key)
+        config.set_preferred_targets(targets)
         self.config = config.load()
         self.setup_error_label.set_text("")
         self.stack.set_visible_child_name("translate")
@@ -222,7 +248,39 @@ class PopupWindow(Gtk.Window):
         self.source_textview.grab_focus()
         self.source_buffer.place_cursor(self.source_buffer.get_end_iter())
         if text and text.strip():
-            self.do_translate()
+            self._auto_translate(text)
+        return False
+
+    def _auto_translate(self, text):
+        """Pick a target that differs from the clipboard text's language, then translate.
+
+        Detection runs off the main thread: langdetect loads its language
+        profiles on first use, which would otherwise freeze the window.
+        """
+        source_id = self.source_lang_combo.get_active_id()
+        pinned_source = None if source_id in (None, "AUTO") else source_id
+        ranked = config.ranked_targets(self.config, self.usage)
+
+        self.request_generation += 1
+        gen = self.request_generation
+        self._set_busy(True)
+
+        def worker():
+            try:
+                detected = pinned_source or detect.detect(text)
+            except Exception:
+                detected = None  # never leave the window stuck busy
+            target = detect.choose_target(detected, ranked)
+            GLib.idle_add(self._on_auto_target_chosen, gen, target)
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    def _on_auto_target_chosen(self, gen, target):
+        if gen != self.request_generation:
+            return False
+        if target:
+            self.target_lang_combo.set_active_id(target)
+        self.do_translate()
         return False
 
     def _on_delete_event(self, widget, event):
@@ -268,23 +326,34 @@ class PopupWindow(Gtk.Window):
         def worker():
             try:
                 result = api.translate(text, target_id, source_lang=source_lang, api_key=api_key)
-                GLib.idle_add(self._on_translate_done, gen, result, None)
+                GLib.idle_add(self._on_translate_done, gen, target_id, result, None)
             except api.DeepLError as e:
-                GLib.idle_add(self._on_translate_done, gen, None, e)
+                GLib.idle_add(self._on_translate_done, gen, target_id, None, e)
 
         threading.Thread(target=worker, daemon=True).start()
 
-    def _on_translate_done(self, gen, result, error):
+    def _on_translate_done(self, gen, target_id, result, error):
         if gen != self.request_generation:
             return False
         self._set_busy(False)
         if error is not None:
             self._show_error(error)
             return False
+        # Text already in the target language isn't a real use of that target.
+        detected = languages.to_source_code(result.detected_source_language.upper())
+        if detected != languages.to_source_code(target_id):
+            self._record_usage(target_id)
         self.target_buffer.set_text(result.text)
         self.last_detected_source = result.detected_source_language
         self._clear_error()
         return False
+
+    def _record_usage(self, target_id):
+        self.usage[target_id] = self.usage.get(target_id, 0) + 1
+        try:
+            config.save_usage(self.usage)
+        except OSError:
+            pass
 
     def do_swap(self):
         source_id = self.source_lang_combo.get_active_id()

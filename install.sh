@@ -8,7 +8,7 @@ AUTOSTART_FILE="$AUTOSTART_DIR/deepl-popup.desktop"
 
 echo "==> Installing system dependencies (apt)"
 sudo apt-get update -qq
-sudo apt-get install -y python3-gi gir1.2-gtk-3.0 python3-requests wl-clipboard
+sudo apt-get install -y python3-gi gir1.2-gtk-3.0 python3-requests python3-langdetect wl-clipboard
 
 echo "==> Writing autostart entry: $AUTOSTART_FILE"
 mkdir -p "$AUTOSTART_DIR"
@@ -38,6 +38,8 @@ After that, pressing the shortcut with something on your clipboard will pop
 up the translator. If you haven't set a DeepL API key yet, the popup's first
 screen will ask for one (get a free key at https://www.deepl.com/pro-api).
 
-To set the key from the terminal instead:
-  ${PYTHON_BIN} -m deepl_popup.daemon --set-key "YOUR_API_KEY"
+The setup screen also asks for your two most-used output languages, which
+seed the automatic choice of output language. To set both from the terminal
+instead:
+  ${PYTHON_BIN} -m deepl_popup.daemon --set-key "YOUR_API_KEY" --languages EN-US,JA
 EOF

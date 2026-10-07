@@ -47,6 +47,12 @@ def main():
     parser = argparse.ArgumentParser(description="DeepL popup translator daemon")
     parser.add_argument("--debug", action="store_true", help="log to stdout")
     parser.add_argument("--set-key", metavar="API_KEY", help="save the DeepL API key and exit")
+    parser.add_argument(
+        "--languages",
+        metavar="LANG1,LANG2",
+        help="save your most-used output languages (e.g. EN-US,JA) and exit; "
+        "the starting point for auto-choosing the target language",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -54,9 +60,16 @@ def main():
         format="%(asctime)s %(name)s %(levelname)s %(message)s",
     )
 
-    if args.set_key:
-        config.set_api_key(args.set_key)
-        print(f"API key saved to {config.CONFIG_PATH}")
+    if args.set_key or args.languages:
+        if args.set_key:
+            config.set_api_key(args.set_key)
+            print(f"API key saved to {config.CONFIG_PATH}")
+        if args.languages:
+            codes = [c.strip().upper() for c in args.languages.split(",") if c.strip()]
+            if not codes:
+                parser.error("--languages needs at least one language code")
+            config.set_preferred_targets(codes)
+            print(f"Most-used output languages set to {', '.join(codes)}")
         return
 
     daemon = Daemon()
