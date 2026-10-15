@@ -61,7 +61,8 @@ The key is stored in `~/.config/deepl-popup/config.ini` (mode 600).
 
 When the popup opens with clipboard text, it detects the text's language
 locally (no API call) and sets the output to your most-used language that
-*isn't* the text's language. With English and Japanese as your top two,
+*isn't* the text's language. Nothing is sent to DeepL until you click
+**Translate** or press Ctrl+Enter. With English and Japanese as your top two,
 Japanese text goes to English, English text goes to Japanese, and anything
 else goes to whichever of the two you use most.
 
@@ -82,9 +83,9 @@ else goes to whichever of the two you use most.
 
 1. Copy some text anywhere.
 2. Press your shortcut (e.g. Ctrl+Alt+C).
-3. The popup appears with the copied text on the left (auto-translated on
-   the right). Edit the left side and click **Translate** (or Ctrl+Enter) to
-   re-translate.
+3. The popup appears with the copied text on the left. Nothing is sent to
+   DeepL yet — edit the text if you like, then click **Translate** (or press
+   Ctrl+Enter) to translate it.
 4. Use the swap button (⇄) to swap the two languages and text.
 5. Click **Copy** to copy the translated text to your clipboard.
 6. Press Escape or close the window to dismiss it — the daemon stays running

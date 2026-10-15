@@ -32,6 +32,9 @@ class PopupWindow(Gtk.Window):
         self.usage = config.load_usage()
         self.last_detected_source = None
         self.request_generation = 0
+        self.detect_generation = 0
+        self.detecting = False
+        self.translate_pending = False
 
         self.connect("delete-event", self._on_delete_event)
         self.connect("key-press-event", self._on_key_press)
@@ -245,42 +248,53 @@ class PopupWindow(Gtk.Window):
             except (FileNotFoundError, subprocess.TimeoutExpired):
                 text = ""
         self.source_buffer.set_text(text or "")
+        self.target_buffer.set_text("")
+        self._clear_error()
+        self.request_generation += 1  # drop any translation still in flight
+        self._set_busy(False)
         self.source_textview.grab_focus()
         self.source_buffer.place_cursor(self.source_buffer.get_end_iter())
-        if text and text.strip():
-            self._auto_translate(text)
+        self._pick_target_for(text or "")
         return False
 
-    def _auto_translate(self, text):
-        """Pick a target that differs from the clipboard text's language, then translate.
+    def _pick_target_for(self, text):
+        """Pick a target that differs from the clipboard text's language.
 
-        Detection runs off the main thread: langdetect loads its language
-        profiles on first use, which would otherwise freeze the window.
+        No API call — translation waits for Translate / Ctrl+Enter. Detection
+        runs off the main thread: langdetect loads its language profiles on
+        first use, which would otherwise freeze the window.
         """
+        self.detect_generation += 1
+        self.detecting = False
+        self.translate_pending = False
+        if not text.strip():
+            return
+
         source_id = self.source_lang_combo.get_active_id()
         pinned_source = None if source_id in (None, "AUTO") else source_id
         ranked = config.ranked_targets(self.config, self.usage)
-
-        self.request_generation += 1
-        gen = self.request_generation
-        self._set_busy(True)
+        gen = self.detect_generation
+        self.detecting = True
 
         def worker():
             try:
                 detected = pinned_source or detect.detect(text)
             except Exception:
-                detected = None  # never leave the window stuck busy
+                detected = None
             target = detect.choose_target(detected, ranked)
             GLib.idle_add(self._on_auto_target_chosen, gen, target)
 
         threading.Thread(target=worker, daemon=True).start()
 
     def _on_auto_target_chosen(self, gen, target):
-        if gen != self.request_generation:
+        if gen != self.detect_generation:
             return False
+        self.detecting = False
         if target:
             self.target_lang_combo.set_active_id(target)
-        self.do_translate()
+        if self.translate_pending:
+            self.translate_pending = False
+            self.do_translate()
         return False
 
     def _on_delete_event(self, widget, event):
@@ -313,6 +327,11 @@ class PopupWindow(Gtk.Window):
     def do_translate(self):
         text = self._get_source_text()
         if not text.strip():
+            return
+        if self.detecting:
+            # Ctrl+Enter pressed before the target was auto-picked: translate
+            # as soon as it is, rather than into the previous target.
+            self.translate_pending = True
             return
         source_id = self.source_lang_combo.get_active_id()
         target_id = self.target_lang_combo.get_active_id()
